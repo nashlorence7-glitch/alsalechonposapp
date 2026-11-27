@@ -594,18 +594,20 @@ function resetOrder(){cart={};disc=0;otype="Dine-in";setSeg("otype","Dine-in");s
 function setSeg(id,v){Array.prototype.forEach.call($(id).children,function(b){b.classList.toggle("on",b.dataset.v===v)})}
 
 /* Custom menu items */
-var KEY2="alsa_pos_items_v1",KEY3="alsa_pos_hidden_v1",KEY5="alsa_pos_prices_v1",prices={},customs=[],hidden=[],ORIG=[],newImg="";
+var KEY2="alsa_pos_items_v1",KEY3="alsa_pos_hidden_v1",KEY5="alsa_pos_prices_v1",KEY7="alsa_pos_menuts_v1",menuTs=0,menuLegacy=false,prices={},customs=[],hidden=[],ORIG=[],newImg="";
 var EMO={bowl:"🍚",drinks:"🥤",lechon:"🐖",other:"🍽️"};
 function loadItems(){
  ORIG=MENU.slice();
  try{var h=JSON.parse(localStorage.getItem(KEY3)||"[]");if(Array.isArray(h))hidden=h}catch(e){}
  try{var pp=JSON.parse(localStorage.getItem(KEY5)||"{}");if(pp&&typeof pp==="object")prices=pp}catch(e){}
- ORIG.forEach(function(m){if(prices[m.id]>0)m.p=prices[m.id]});
+ ORIG.forEach(function(m){m.p0=m.p;if(prices[m.id]>0)m.p=prices[m.id]});
+ try{menuTs=+localStorage.getItem(KEY7)||0}catch(e){}
+ if(!menuTs&&(customs.length||hidden.length||Object.keys(prices).length))menuLegacy=true;
  MENU=MENU.filter(function(m){return hidden.indexOf(m.id)<0});
  try{var d=JSON.parse(localStorage.getItem(KEY2)||"[]");if(Array.isArray(d))d.forEach(function(m){if(m&&m.id&&m.n&&m.p>0){if(m.c==="kilo")m.c="other";customs.push(m);MENU.push(m)}})}catch(e){}
 }
-function saveHidden(){try{localStorage.setItem(KEY3,JSON.stringify(hidden))}catch(e){}}
-function saveItems(){try{localStorage.setItem(KEY2,JSON.stringify(customs));return true}catch(e){return false}}
+function saveHidden(){try{localStorage.setItem(KEY3,JSON.stringify(hidden))}catch(e){}touchMenu()}
+function saveItems(){try{localStorage.setItem(KEY2,JSON.stringify(customs));touchMenu();return true}catch(e){return false}}
 function setPv(){
  $("aPv").innerHTML=newImg?'<img src="'+newImg+'" alt="">':EMO[$("aCat").value]||"🍽️";
  $("aClr").style.display=newImg?"":"none";
@@ -668,7 +670,7 @@ function setPrice(id){
  if(p===m.p){toast("Price unchanged");return}
  var old=m.p;m.p=p;
  if(customs.some(function(x){return x.id===id})){customs.forEach(function(x){if(x.id===id)x.p=p});if(!saveItems()){m.p=old;toast("Could not save");return}}
- else{prices[id]=p;try{localStorage.setItem(KEY5,JSON.stringify(prices))}catch(e){m.p=old;toast("Could not save");return}}
+ else{prices[id]=p;try{localStorage.setItem(KEY5,JSON.stringify(prices));touchMenu()}catch(e){m.p=old;toast("Could not save");return}}
  renderGrid();renderCart();renderCustom();toast(m.n+": "+peso(p));
 }
 function removeItem(id){
@@ -1369,6 +1371,50 @@ function syncAll(){
   if(e&&e.code==="42P01")syncErr="Table pos_orders missing - run the SQL setup in Supabase";
  }).then(function(){syncBusy=false;chip()});
 }
+
+/* ===== Menu cloud sync (Supabase table: pos_menu) ===== */
+var menuBusy=false,menuWarned=false,menuTimer=null;
+function touchMenu(){
+ menuTs=Date.now();menuLegacy=false;
+ try{localStorage.setItem(KEY7,String(menuTs))}catch(e){}
+ clearTimeout(menuTimer);menuTimer=setTimeout(syncMenu,800);
+}
+function menuState(){return {ts:menuTs,customs:customs,hidden:hidden,prices:prices}}
+function applyMenu(d){
+ customs=Array.isArray(d.customs)?d.customs.filter(function(m){return m&&m.id&&m.n&&m.p>0}):[];
+ hidden=Array.isArray(d.hidden)?d.hidden:[];
+ prices=(d.prices&&typeof d.prices==="object")?d.prices:{};
+ menuTs=+d.ts||Date.now();menuLegacy=false;
+ try{localStorage.setItem(KEY2,JSON.stringify(customs));localStorage.setItem(KEY3,JSON.stringify(hidden));localStorage.setItem(KEY5,JSON.stringify(prices));localStorage.setItem(KEY7,String(menuTs))}catch(e){}
+ ORIG.forEach(function(m){m.p=prices[m.id]>0?prices[m.id]:m.p0});
+ MENU=ORIG.filter(function(m){return hidden.indexOf(m.id)<0}).concat(customs);
+ Object.keys(cart).forEach(function(id){if(!item(id))delete cart[id]});
+ renderTabs();renderCart();
+ if($("ovAdd").classList.contains("on"))renderCustom();
+}
+function mergeMenu(a,b){
+ var seen={},cu=[];
+ (a.customs||[]).concat(b.customs||[]).forEach(function(m){if(m&&m.id&&!seen[m.id]){seen[m.id]=1;cu.push(m)}});
+ var h=(a.hidden||[]).slice();(b.hidden||[]).forEach(function(x){if(h.indexOf(x)<0)h.push(x)});
+ var pr={},k;for(k in (b.prices||{}))pr[k]=b.prices[k];for(k in (a.prices||{}))pr[k]=a.prices[k];
+ return {ts:Date.now(),customs:cu,hidden:h,prices:pr};
+}
+function pushMenu(){
+ return sbReq("POST","pos_menu?on_conflict=id",[{id:"menu",data:menuState(),updated_at:new Date().toISOString()}],{Prefer:"resolution=merge-duplicates,return=minimal"});
+}
+function syncMenu(){
+ if(!ses||menuBusy||!navigator.onLine)return Promise.resolve();
+ menuBusy=true;
+ return sbReq("GET","pos_menu?select=data&id=eq.menu").then(function(rows){
+  var rem=rows&&rows[0]&&rows[0].data;
+  if(!rem){if(menuTs||menuLegacy){if(menuLegacy){menuTs=Date.now();try{localStorage.setItem(KEY7,String(menuTs))}catch(e){}menuLegacy=false}return pushMenu()}return}
+  if(menuLegacy){var m=mergeMenu(menuState(),rem);applyMenu(m);return pushMenu()}
+  if((+rem.ts||0)>menuTs){applyMenu(rem);toast("Menu updated from cloud")}
+  else if(menuTs>(+rem.ts||0))return pushMenu();
+ }).then(function(){menuWarned=false}).catch(function(e){
+  if(e&&(e.code==="42P01"||e.code==="PGRST205")&&!menuWarned){menuWarned=true;toast("Menu sync needs the pos_menu table - run the SQL setup in Supabase")}
+ }).then(function(){menuBusy=false});
+}
 function pickUser(u){
  CUR=u;load();cart={};disc=0;otype="Dine-in";setSeg("otype","Dine-in");setSeg("disc","0");
  $("btnUser").innerHTML='👤 <span class="ct">'+UNAME[u]+' ⇄</span><span class="cm">'+u.slice(1)+'</span>';
@@ -1383,10 +1429,11 @@ $("uLogo").src=document.querySelector("header img").src;
 $("ovUser").addEventListener("click",function(e){var b=e.target.closest(".ub");if(b)pickUser(b.dataset.u)});
 $("btnUser").addEventListener("click",showUsers);
 $("syncChip").addEventListener("click",function(){
- if(!ses){var t=document.querySelector('#nav [data-v="inv"]');if(t)t.click()}else syncAll();
+ if(!ses){var t=document.querySelector('#nav [data-v="inv"]');if(t)t.click()}else{syncAll();syncMenu()}
 });
-window.addEventListener("online",syncAll);
-setInterval(syncAll,20000);
+window.addEventListener("online",function(){syncAll();syncMenu()});
+setInterval(function(){syncAll();syncMenu()},20000);
+setTimeout(syncMenu,1500);
 
 document.body.className="v-pos";loadItems();renderTabs();renderCart();fbLoad();showMsgState();
 $("ovUser").classList.add("on");if(fbConnected()){fbRefresh();fbStart()}
