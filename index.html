@@ -1373,9 +1373,9 @@ function syncAll(){
 }
 
 /* ===== Menu cloud sync (Supabase table: pos_menu) ===== */
-var menuBusy=false,menuWarned=false,menuTimer=null;
+var menuBusy=false,menuWarned=false,menuTimer=null,menuAgain=false;
 function touchMenu(){
- menuTs=Date.now();menuLegacy=false;
+ menuTs=Date.now();menuLegacy=false;if(menuBusy)menuAgain=true;
  try{localStorage.setItem(KEY7,String(menuTs))}catch(e){}
  clearTimeout(menuTimer);menuTimer=setTimeout(syncMenu,800);
 }
@@ -1399,21 +1399,25 @@ function mergeMenu(a,b){
  var pr={},k;for(k in (b.prices||{}))pr[k]=b.prices[k];for(k in (a.prices||{}))pr[k]=a.prices[k];
  return {ts:Date.now(),customs:cu,hidden:h,prices:pr};
 }
+function menuMissing(e){return e&&(e.code==="42P01"||e.code==="PGRST205")}
+function getRemoteMenu(){
+ return sbReq("GET","pos_menu?select=data&id=eq.menu").then(function(r){return r&&r[0]&&r[0].data});
+}
 function pushMenu(){
  return sbReq("POST","pos_menu?on_conflict=id",[{id:"menu",data:menuState(),updated_at:new Date().toISOString()}],{Prefer:"resolution=merge-duplicates,return=minimal"});
 }
 function syncMenu(){
  if(!ses||menuBusy||!navigator.onLine)return Promise.resolve();
  menuBusy=true;
- return sbReq("GET","pos_menu?select=data&id=eq.menu").then(function(rows){
-  var rem=rows&&rows[0]&&rows[0].data;
+ return getRemoteMenu().then(function(rem){
   if(!rem){if(menuTs||menuLegacy){if(menuLegacy){menuTs=Date.now();try{localStorage.setItem(KEY7,String(menuTs))}catch(e){}menuLegacy=false}return pushMenu()}return}
   if(menuLegacy){var m=mergeMenu(menuState(),rem);applyMenu(m);return pushMenu()}
   if((+rem.ts||0)>menuTs){applyMenu(rem);toast("Menu updated from cloud")}
   else if(menuTs>(+rem.ts||0))return pushMenu();
  }).then(function(){menuWarned=false}).catch(function(e){
-  if(e&&(e.code==="42P01"||e.code==="PGRST205")&&!menuWarned){menuWarned=true;toast("Menu sync needs the pos_menu table - run the SQL setup in Supabase")}
- }).then(function(){menuBusy=false});
+  if(e instanceof TypeError)return;
+  if(!menuWarned){menuWarned=true;toast(menuMissing(e)?"Menu sync needs the pos_menu table - run the SQL setup in Supabase":"Menu sync failed: "+((e&&(e.message||e.msg))||"error"))}
+ }).then(function(){menuBusy=false;if(menuAgain){menuAgain=false;setTimeout(syncMenu,300)}});
 }
 function pickUser(u){
  CUR=u;load();cart={};disc=0;otype="Dine-in";setSeg("otype","Dine-in");setSeg("disc","0");
