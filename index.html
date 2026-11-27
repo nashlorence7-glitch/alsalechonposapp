@@ -238,6 +238,9 @@ button.or:hover{background:var(--bg)}
 .cu .pe input{width:86px;padding:6px 8px;text-align:right}
 .cu .pe .btn{padding:6px 12px;font-size:13px}
 .cu{flex-wrap:wrap;gap:6px}
+.cu .th{flex:none;width:38px;height:38px;border-radius:8px;object-fit:cover;background:var(--ln);display:flex;align-items:center;justify-content:center;font-size:20px;overflow:hidden}
+.cu .th img{width:100%;height:100%;object-fit:cover}
+.cu .ph2{padding:6px 10px;font-size:13px}
 /* ===== Mobile polish ===== */
 button{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 html,body{overscroll-behavior:none}
@@ -476,6 +479,7 @@ header{padding-top:env(safe-area-inset-top)}
   <div><button class="btn" id="aPick" type="button">Choose photo</button> <button class="btn" id="aClr" type="button" style="display:none">Remove</button></div>
   <input type="file" id="aFile" accept="image/*" style="display:none">
  </div>
+ <input type="file" id="cuFile" accept="image/*" style="display:none">
  <div id="cuBox" style="display:none"><div class="lbl">Current menu (edit prices or remove items)</div><div id="cuList"></div></div>
  <div class="mact"><button class="btn" id="aCancel">Cancel</button><button class="btn g" id="aOk">Add to menu</button></div>
 </div></div>
@@ -594,13 +598,14 @@ function resetOrder(){cart={};disc=0;otype="Dine-in";setSeg("otype","Dine-in");s
 function setSeg(id,v){Array.prototype.forEach.call($(id).children,function(b){b.classList.toggle("on",b.dataset.v===v)})}
 
 /* Custom menu items */
-var KEY2="alsa_pos_items_v1",KEY3="alsa_pos_hidden_v1",KEY5="alsa_pos_prices_v1",KEY7="alsa_pos_menuts_v1",menuTs=0,menuLegacy=false,prices={},customs=[],hidden=[],ORIG=[],newImg="";
+var KEY2="alsa_pos_items_v1",KEY3="alsa_pos_hidden_v1",KEY5="alsa_pos_prices_v1",KEY7="alsa_pos_menuts_v1",KEY8="alsa_pos_imgs_v1",imgs={},menuTs=0,menuLegacy=false,prices={},customs=[],hidden=[],ORIG=[],newImg="";
 var EMO={bowl:"🍚",drinks:"🥤",lechon:"🐖",other:"🍽️"};
 function loadItems(){
  ORIG=MENU.slice();
  try{var h=JSON.parse(localStorage.getItem(KEY3)||"[]");if(Array.isArray(h))hidden=h}catch(e){}
  try{var pp=JSON.parse(localStorage.getItem(KEY5)||"{}");if(pp&&typeof pp==="object")prices=pp}catch(e){}
- ORIG.forEach(function(m){m.p0=m.p;if(prices[m.id]>0)m.p=prices[m.id]});
+ try{var ii=JSON.parse(localStorage.getItem(KEY8)||"{}");if(ii&&typeof ii==="object")imgs=ii}catch(e){}
+ ORIG.forEach(function(m){m.p0=m.p;m.i0=m.img;if(prices[m.id]>0)m.p=prices[m.id];if(imgs[m.id])m.img=imgs[m.id]});
  try{menuTs=+localStorage.getItem(KEY7)||0}catch(e){}
  if(!menuTs&&(customs.length||hidden.length||Object.keys(prices).length))menuLegacy=true;
  MENU=MENU.filter(function(m){return hidden.indexOf(m.id)<0});
@@ -615,7 +620,7 @@ function setPv(){
 function renderCustom(){
  $("cuBox").style.display="";
  $("cuList").innerHTML=(MENU.length?MENU.map(function(m){
-  return '<div class="cu"><span>'+esc(m.n)+'</span><span class="pe">₱<input type="number" inputmode="decimal" min="0" step="0.01" value="'+m.p+'" data-pi="'+m.id+'" aria-label="Price of '+esc(m.n)+'"><button class="btn" data-sp="'+m.id+'" type="button">Save</button></span><button class="x" data-rm="'+m.id+'">Remove</button></div>';
+  return '<div class="cu"><span class="th">'+(m.img?'<img src="'+m.img+'" alt="">':(m.e||"🍽️"))+'</span><span>'+esc(m.n)+'</span><button class="btn ph2" data-ph="'+m.id+'" type="button">Photo</button><span class="pe">₱<input type="number" inputmode="decimal" min="0" step="0.01" value="'+m.p+'" data-pi="'+m.id+'" aria-label="Price of '+esc(m.n)+'"><button class="btn" data-sp="'+m.id+'" type="button">Save</button></span><button class="x" data-rm="'+m.id+'">Remove</button></div>';
  }).join(""):'<div class="cu"><span>No items on the menu.</span></div>')+
  (hidden.length?'<button class="btn" id="cuRestore" style="width:100%;margin-top:10px;padding:10px;font-size:14px">Restore original items ('+hidden.length+' removed)</button>':'');
 }
@@ -632,16 +637,24 @@ function openAdd(){
  $("ovAdd").classList.add("on");
  setTimeout(function(){$("aName").focus()},50);
 }
-function pickPhoto(file){
+var PHOTO_MAX=30000; /* max photo size in bytes (~30 KB) to keep the database small */
+function shrinkImg(im){
+ var sizes=[320,260,200,150],qs=[0.7,0.55,0.4,0.3],u="";
+ for(var i=0;i<sizes.length;i++){
+  var sc=Math.min(1,sizes[i]/Math.max(im.width,im.height)),c=document.createElement("canvas");
+  c.width=Math.max(1,Math.round(im.width*sc));c.height=Math.max(1,Math.round(im.height*sc));
+  c.getContext("2d").drawImage(im,0,0,c.width,c.height);
+  for(var j=0;j<qs.length;j++){u=c.toDataURL("image/jpeg",qs[j]);if(u.length*0.75<=PHOTO_MAX)return u}
+ }
+ return u;
+}
+function pickPhoto(file,cb){
  if(!file)return;
  var r=new FileReader();
  r.onload=function(){
   var im=new Image();
   im.onload=function(){
-   var max=400,sc=Math.min(1,max/Math.max(im.width,im.height));
-   var c=document.createElement("canvas");c.width=Math.round(im.width*sc);c.height=Math.round(im.height*sc);
-   c.getContext("2d").drawImage(im,0,0,c.width,c.height);
-   newImg=c.toDataURL("image/jpeg",0.8);setPv();
+   var u=shrinkImg(im);if(cb)cb(u);else{newImg=u;setPv()}
   };
   im.onerror=function(){toast("Could not read that image")};
   im.src=r.result;
@@ -672,6 +685,16 @@ function setPrice(id){
  if(customs.some(function(x){return x.id===id})){customs.forEach(function(x){if(x.id===id)x.p=p});if(!saveItems()){m.p=old;toast("Could not save");return}}
  else{prices[id]=p;try{localStorage.setItem(KEY5,JSON.stringify(prices));touchMenu()}catch(e){m.p=old;toast("Could not save");return}}
  renderGrid();renderCart();renderCustom();toast(m.n+": "+peso(p));
+}
+var photoFor="";
+function setItemPhoto(id,u){
+ var m=item(id);if(!m)return;
+ var oldImg=m.img,oldMap=imgs[id];
+ m.img=u;
+ if(customs.some(function(x){return x.id===id})){customs.forEach(function(x){if(x.id===id)x.img=u});
+  if(!saveItems()){m.img=oldImg;customs.forEach(function(x){if(x.id===id)x.img=oldImg});toast("Not enough storage. Try a smaller photo.");return}}
+ else{imgs[id]=u;try{localStorage.setItem(KEY8,JSON.stringify(imgs));touchMenu()}catch(e){m.img=oldImg;if(oldMap)imgs[id]=oldMap;else delete imgs[id];toast("Not enough storage. Try a smaller photo.");return}}
+ renderGrid();renderCustom();toast("Photo updated: "+m.n);
 }
 function removeItem(id){
  var m=item(id);if(!m||!confirm("Remove \""+m.n+"\" from the menu?"))return;
@@ -1187,10 +1210,11 @@ $("aOk").addEventListener("click",addItem);
 $("aCat").addEventListener("change",setPv);
 $("aPick").addEventListener("click",function(){$("aFile").click()});
 $("aFile").addEventListener("change",function(){pickPhoto(this.files[0])});
+$("cuFile").addEventListener("change",function(){var id=photoFor;pickPhoto(this.files[0],function(u){setItemPhoto(id,u)})});
 $("aClr").addEventListener("click",function(){newImg="";$("aFile").value="";setPv()});
 $("aPrice").addEventListener("keydown",function(e){if(e.key==="Enter")addItem()});
 $("cuList").addEventListener("keydown",function(e){if(e.key==="Enter"&&e.target.dataset.pi){e.preventDefault();setPrice(e.target.dataset.pi)}});
-$("cuList").addEventListener("click",function(e){if(e.target.id==="cuRestore"){restoreItems();return}var sp=e.target.closest("[data-sp]");if(sp){setPrice(sp.dataset.sp);return}var b=e.target.closest("[data-rm]");if(b)removeItem(b.dataset.rm)});
+$("cuList").addEventListener("click",function(e){if(e.target.id==="cuRestore"){restoreItems();return}var ph=e.target.closest("[data-ph]");if(ph){photoFor=ph.dataset.ph;$("cuFile").value="";$("cuFile").click();return}var sp=e.target.closest("[data-sp]");if(sp){setPrice(sp.dataset.sp);return}var b=e.target.closest("[data-rm]");if(b)removeItem(b.dataset.rm)});
 $("fConnect").addEventListener("click",fbConnect);
 $("fTok").addEventListener("keydown",function(e){if(e.key==="Enter")fbConnect()});
 $("fRefresh").addEventListener("click",fbRefresh);
@@ -1319,10 +1343,7 @@ function invPick(file){
  r.onload=function(){
   var im=new Image();
   im.onload=function(){
-   var sc=Math.min(1,320/Math.max(im.width,im.height)),c=document.createElement("canvas");
-   c.width=Math.round(im.width*sc);c.height=Math.round(im.height*sc);
-   c.getContext("2d").drawImage(im,0,0,c.width,c.height);
-   invImg=c.toDataURL("image/jpeg",0.7);invPv();
+   invImg=shrinkImg(im);invPv();
   };
   im.onerror=function(){toast("Could not read that image")};
   im.src=r.result;
@@ -1379,14 +1400,16 @@ function touchMenu(){
  try{localStorage.setItem(KEY7,String(menuTs))}catch(e){}
  clearTimeout(menuTimer);menuTimer=setTimeout(syncMenu,800);
 }
-function menuState(){return {ts:menuTs,customs:customs,hidden:hidden,prices:prices}}
+function menuState(){return {ts:menuTs,customs:customs,hidden:hidden,prices:prices,imgs:imgs}}
 function applyMenu(d){
  customs=Array.isArray(d.customs)?d.customs.filter(function(m){return m&&m.id&&m.n&&m.p>0}):[];
  hidden=Array.isArray(d.hidden)?d.hidden:[];
  prices=(d.prices&&typeof d.prices==="object")?d.prices:{};
+ imgs=(d.imgs&&typeof d.imgs==="object")?d.imgs:{};
  menuTs=+d.ts||Date.now();menuLegacy=false;
- try{localStorage.setItem(KEY2,JSON.stringify(customs));localStorage.setItem(KEY3,JSON.stringify(hidden));localStorage.setItem(KEY5,JSON.stringify(prices));localStorage.setItem(KEY7,String(menuTs))}catch(e){}
- ORIG.forEach(function(m){m.p=prices[m.id]>0?prices[m.id]:m.p0});
+ try{localStorage.setItem(KEY2,JSON.stringify(customs));localStorage.setItem(KEY3,JSON.stringify(hidden));localStorage.setItem(KEY5,JSON.stringify(prices));localStorage.setItem(KEY8,JSON.stringify(imgs));localStorage.setItem(KEY7,String(menuTs))}catch(e){}
+ ORIG.forEach(function(m){m.p=prices[m.id]>0?prices[m.id]:m.p0;m.img=imgs[m.id]||m.i0});
+ renderGrid();
  MENU=ORIG.filter(function(m){return hidden.indexOf(m.id)<0}).concat(customs);
  Object.keys(cart).forEach(function(id){if(!item(id))delete cart[id]});
  renderTabs();renderCart();
@@ -1397,7 +1420,8 @@ function mergeMenu(a,b){
  (a.customs||[]).concat(b.customs||[]).forEach(function(m){if(m&&m.id&&!seen[m.id]){seen[m.id]=1;cu.push(m)}});
  var h=(a.hidden||[]).slice();(b.hidden||[]).forEach(function(x){if(h.indexOf(x)<0)h.push(x)});
  var pr={},k;for(k in (b.prices||{}))pr[k]=b.prices[k];for(k in (a.prices||{}))pr[k]=a.prices[k];
- return {ts:Date.now(),customs:cu,hidden:h,prices:pr};
+ var im={};for(k in (b.imgs||{}))im[k]=b.imgs[k];for(k in (a.imgs||{}))im[k]=a.imgs[k];
+ return {ts:Date.now(),customs:cu,hidden:h,prices:pr,imgs:im};
 }
 function menuMissing(e){return e&&(e.code==="42P01"||e.code==="PGRST205")}
 function getRemoteMenu(){
