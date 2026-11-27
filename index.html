@@ -234,6 +234,10 @@ button.or:hover{background:var(--bg)}
 #syncChip{font-size:12px;font-weight:700;padding:4px 10px;border-radius:99px;background:rgba(255,255,255,.18);color:#fff;border:0;font-family:inherit}
 #syncChip.bad{background:#E0A526;color:#2a1a00}
 
+.cu .pe{flex:none;display:inline-flex;align-items:center;gap:6px;margin-left:auto}
+.cu .pe input{width:86px;padding:6px 8px;text-align:right}
+.cu .pe .btn{padding:6px 12px;font-size:13px}
+.cu{flex-wrap:wrap;gap:6px}
 /* ===== Mobile polish ===== */
 button{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 html,body{overscroll-behavior:none}
@@ -472,7 +476,7 @@ header{padding-top:env(safe-area-inset-top)}
   <div><button class="btn" id="aPick" type="button">Choose photo</button> <button class="btn" id="aClr" type="button" style="display:none">Remove</button></div>
   <input type="file" id="aFile" accept="image/*" style="display:none">
  </div>
- <div id="cuBox" style="display:none"><div class="lbl">Current menu (remove items here)</div><div id="cuList"></div></div>
+ <div id="cuBox" style="display:none"><div class="lbl">Current menu (edit prices or remove items)</div><div id="cuList"></div></div>
  <div class="mact"><button class="btn" id="aCancel">Cancel</button><button class="btn g" id="aOk">Add to menu</button></div>
 </div></div>
 <div class="ov" id="ovInv"><div class="md">
@@ -590,11 +594,13 @@ function resetOrder(){cart={};disc=0;otype="Dine-in";setSeg("otype","Dine-in");s
 function setSeg(id,v){Array.prototype.forEach.call($(id).children,function(b){b.classList.toggle("on",b.dataset.v===v)})}
 
 /* Custom menu items */
-var KEY2="alsa_pos_items_v1",KEY3="alsa_pos_hidden_v1",customs=[],hidden=[],ORIG=[],newImg="";
+var KEY2="alsa_pos_items_v1",KEY3="alsa_pos_hidden_v1",KEY5="alsa_pos_prices_v1",prices={},customs=[],hidden=[],ORIG=[],newImg="";
 var EMO={bowl:"🍚",drinks:"🥤",lechon:"🐖",other:"🍽️"};
 function loadItems(){
  ORIG=MENU.slice();
  try{var h=JSON.parse(localStorage.getItem(KEY3)||"[]");if(Array.isArray(h))hidden=h}catch(e){}
+ try{var pp=JSON.parse(localStorage.getItem(KEY5)||"{}");if(pp&&typeof pp==="object")prices=pp}catch(e){}
+ ORIG.forEach(function(m){if(prices[m.id]>0)m.p=prices[m.id]});
  MENU=MENU.filter(function(m){return hidden.indexOf(m.id)<0});
  try{var d=JSON.parse(localStorage.getItem(KEY2)||"[]");if(Array.isArray(d))d.forEach(function(m){if(m&&m.id&&m.n&&m.p>0){if(m.c==="kilo")m.c="other";customs.push(m);MENU.push(m)}})}catch(e){}
 }
@@ -607,7 +613,7 @@ function setPv(){
 function renderCustom(){
  $("cuBox").style.display="";
  $("cuList").innerHTML=(MENU.length?MENU.map(function(m){
-  return '<div class="cu"><span>'+esc(m.n)+' · '+peso(m.p)+'</span><button class="x" data-rm="'+m.id+'">Remove</button></div>';
+  return '<div class="cu"><span>'+esc(m.n)+'</span><span class="pe">₱<input type="number" inputmode="decimal" min="0" step="0.01" value="'+m.p+'" data-pi="'+m.id+'" aria-label="Price of '+esc(m.n)+'"><button class="btn" data-sp="'+m.id+'" type="button">Save</button></span><button class="x" data-rm="'+m.id+'">Remove</button></div>';
  }).join(""):'<div class="cu"><span>No items on the menu.</span></div>')+
  (hidden.length?'<button class="btn" id="cuRestore" style="width:100%;margin-top:10px;padding:10px;font-size:14px">Restore original items ('+hidden.length+' removed)</button>':'');
 }
@@ -654,6 +660,16 @@ function addItem(){
  cat=c;renderTabs();renderGrid();
  $("ovAdd").classList.remove("on");
  toast("Added: "+n);
+}
+function setPrice(id){
+ var m=item(id),inp=document.querySelector('[data-pi="'+id+'"]');if(!m||!inp)return;
+ var p=Math.round(parseFloat(inp.value)*100)/100;
+ if(!(p>0)){toast("Enter a price greater than 0");inp.value=m.p;return}
+ if(p===m.p){toast("Price unchanged");return}
+ var old=m.p;m.p=p;
+ if(customs.some(function(x){return x.id===id})){customs.forEach(function(x){if(x.id===id)x.p=p});if(!saveItems()){m.p=old;toast("Could not save");return}}
+ else{prices[id]=p;try{localStorage.setItem(KEY5,JSON.stringify(prices))}catch(e){m.p=old;toast("Could not save");return}}
+ renderGrid();renderCart();renderCustom();toast(m.n+": "+peso(p));
 }
 function removeItem(id){
  var m=item(id);if(!m||!confirm("Remove \""+m.n+"\" from the menu?"))return;
@@ -1171,7 +1187,8 @@ $("aPick").addEventListener("click",function(){$("aFile").click()});
 $("aFile").addEventListener("change",function(){pickPhoto(this.files[0])});
 $("aClr").addEventListener("click",function(){newImg="";$("aFile").value="";setPv()});
 $("aPrice").addEventListener("keydown",function(e){if(e.key==="Enter")addItem()});
-$("cuList").addEventListener("click",function(e){if(e.target.id==="cuRestore"){restoreItems();return}var b=e.target.closest("[data-rm]");if(b)removeItem(b.dataset.rm)});
+$("cuList").addEventListener("keydown",function(e){if(e.key==="Enter"&&e.target.dataset.pi){e.preventDefault();setPrice(e.target.dataset.pi)}});
+$("cuList").addEventListener("click",function(e){if(e.target.id==="cuRestore"){restoreItems();return}var sp=e.target.closest("[data-sp]");if(sp){setPrice(sp.dataset.sp);return}var b=e.target.closest("[data-rm]");if(b)removeItem(b.dataset.rm)});
 $("fConnect").addEventListener("click",fbConnect);
 $("fTok").addEventListener("keydown",function(e){if(e.key==="Enter")fbConnect()});
 $("fRefresh").addEventListener("click",fbRefresh);
