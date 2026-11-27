@@ -452,6 +452,13 @@ header{padding-top:env(safe-area-inset-top)}
  <div class="mact"><button class="btn" id="pCancel">Cancel</button><button class="btn g" id="pOk">Complete sale</button></div>
 </div></div>
 
+<div class="ov" id="ovCf"><div class="md">
+ <h2>Confirm order</h2>
+ <div class="rc" id="cfBox"></div>
+ <div class="lbl" style="text-align:center;margin-top:10px">Please check the order before processing.</div>
+ <div class="mact"><button class="btn" id="cfBack">Go back</button><button class="btn g" id="cfOk">Confirm &amp; process</button></div>
+</div></div>
+
 <div class="ov" id="ovRc"><div class="md">
  <h2>Sale complete</h2>
  <div class="rc" id="rcBox"></div>
@@ -883,7 +890,28 @@ function calcChange(){
  var el=$("chg");el.classList.toggle("bad",c>0&&ch<0);
  el.innerHTML='<span>'+(c>0&&ch<0?"Short by":"Change")+'</span><b>'+peso(c>0?Math.abs(ch):0)+'</b>';
 }
+function askConfirm(){
+ var t=totals();if(!t.cnt)return;
+ var paid=t.tot;
+ if(method==="Cash"){
+  paid=parseFloat($("cash").value)||0;
+  if(paid<t.tot){toast("Cash received is less than the total");return}
+ }
+ var h='<div class="row"><span>Order type</span><span>'+esc(otype)+'</span></div><hr>';
+ Object.keys(cart).forEach(function(id){var m=item(id);if(m)h+='<div class="row"><span>'+cart[id]+' × '+esc(m.n)+'</span><span>'+peso(m.p*cart[id])+'</span></div>'});
+ h+='<hr><div class="row"><span>Subtotal</span><span>'+peso(t.sub)+'</span></div>';
+ if(t.d)h+='<div class="row"><span>Discount ('+disc+'%)</span><span>−'+peso(t.d)+'</span></div>';
+ h+='<div class="row"><b>TOTAL</b><b>'+peso(t.tot)+'</b></div><hr><div class="row"><span>Payment: '+esc(method)+'</span><span>'+peso(paid)+'</span></div>';
+ if(method==="Cash")h+='<div class="row"><span>Change</span><span>'+peso(paid-t.tot)+'</span></div>';
+ else{var rf=$("ref").value.trim();if(rf)h+='<div class="row"><span>Reference</span><span>'+esc(rf)+'</span></div>'}
+ $("cfBox").innerHTML=h;
+ $("cfOk").disabled=false;
+ $("ovCf").classList.add("on");
+}
 function complete(){
+ if($("cfOk").disabled)return;
+ $("cfOk").disabled=true;
+ $("ovCf").classList.remove("on");
  rollDay();
  var t=totals(),paid=t.tot,change=0;
  if(method==="Cash"){
@@ -1187,9 +1215,11 @@ $("pm").addEventListener("click",function(e){
 });
 $("quick").addEventListener("click",function(e){var b=e.target.closest("button");if(b){$("cash").value=b.dataset.v;calcChange()}});
 $("cash").addEventListener("input",calcChange);
-$("cash").addEventListener("keydown",function(e){if(e.key==="Enter")complete()});
+$("cash").addEventListener("keydown",function(e){if(e.key==="Enter")askConfirm()});
 $("pCancel").addEventListener("click",function(){$("ovPay").classList.remove("on")});
-$("pOk").addEventListener("click",complete);
+$("pOk").addEventListener("click",askConfirm);
+$("cfOk").addEventListener("click",complete);
+$("cfBack").addEventListener("click",function(){$("ovCf").classList.remove("on")});
 $("rcPrint").addEventListener("click",function(){window.print()});
 $("rcNew").addEventListener("click",function(){$("ovRc").classList.remove("on");if(!rcView){resetOrder();$("side").classList.remove("open")}});
 $("btnRep").addEventListener("click",openReport);
@@ -1203,7 +1233,7 @@ $("rCsv").addEventListener("click",csvReport);
 $("rCsvAll").addEventListener("click",csvAll);
 $("fab").addEventListener("click",function(){$("side").classList.add("open")});
 $("btnCl").addEventListener("click",function(){$("side").classList.remove("open")});
-document.addEventListener("keydown",function(e){if(e.key==="Escape"){$("ovRc").classList.remove("on");$("ovAdd").classList.remove("on");$("ovPay").classList.remove("on");$("ovRep").classList.remove("on")}});
+document.addEventListener("keydown",function(e){if(e.key==="Escape"){$("ovCf").classList.remove("on");$("ovRc").classList.remove("on");$("ovAdd").classList.remove("on");$("ovPay").classList.remove("on");$("ovRep").classList.remove("on")}});
 $("btnAdd").addEventListener("click",openAdd);
 $("aCancel").addEventListener("click",function(){$("ovAdd").classList.remove("on")});
 $("aOk").addEventListener("click",addItem);
