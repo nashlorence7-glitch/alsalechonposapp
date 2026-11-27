@@ -1456,7 +1456,7 @@ function syncAll(){
  if(!ses||!CUR||syncBusy||!navigator.onLine)return Promise.resolve();
  syncBusy=true;var who=CUR;
  var p=pending().filter(function(x){return x.by===who});
- var up=p.length?sbReq("POST","pos_orders?on_conflict=client_id",p.map(toRow),{Prefer:"resolution=ignore-duplicates,return=representation"}).then(function(){p.forEach(function(x){x.sy=1});save()}):Promise.resolve();
+ var up=resetCloudOnce(who).then(function(){return p.length?sbReq("POST","pos_orders?on_conflict=client_id",p.map(toRow),{Prefer:"resolution=ignore-duplicates,return=representation"}).then(function(){p.forEach(function(x){x.sy=1});save()}):Promise.resolve()});
  return up.then(function(){
   return sbReq("GET","pos_orders?select=client_id,sale&cashier=eq."+who+"&order=sold_at.desc&limit=1000");
  }).then(function(rows){
@@ -1527,7 +1527,21 @@ function syncMenu(){
   if(!menuWarned){menuWarned=true;toast(menuMissing(e)?"Menu sync needs the pos_menu table - run the SQL setup in Supabase":"Menu sync failed: "+((e&&(e.message||e.msg))||"error"))}
  }).then(function(){menuBusy=false;if(menuAgain){menuAgain=false;setTimeout(syncMenu,300)}});
 }
+/* One-time sales reset (Nov 28 2026): clears User 1 + User 2 sales, local and cloud, then restarts at order #1 */
+var RS="alsa_pos_reset_20261128";
+function rsGet(k){try{return localStorage.getItem(RS+k)==="1"}catch(e){return true}}
+function rsSet(k){try{localStorage.setItem(RS+k,"1")}catch(e){}}
+function resetLocalOnce(u){
+ if(rsGet("_l_"+u))return;
+ try{localStorage.removeItem(KEY+"_"+u);if(u==="u1")localStorage.removeItem(KEY)}catch(e){}
+ rsSet("_l_"+u);
+}
+function resetCloudOnce(u){
+ if(rsGet("_c_"+u)||!ses)return Promise.resolve();
+ return sbReq("DELETE","pos_orders?cashier=eq."+u,null,{Prefer:"return=minimal"}).then(function(){rsSet("_c_"+u)}).catch(function(){});
+}
 function pickUser(u){
+ resetLocalOnce(u);
  CUR=u;load();cart={};disc=0;otype="Dine-in";setSeg("otype","Dine-in");setSeg("disc","0");
  $("btnUser").innerHTML='👤 <span class="ct">'+UNAME[u]+' ⇄</span><span class="cm">'+u.slice(1)+'</span>';
  $("ovUser").classList.remove("on");
