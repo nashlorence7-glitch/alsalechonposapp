@@ -469,15 +469,25 @@ header{padding-top:env(safe-area-inset-top)}
 <div class="ov" id="ovRc"><div class="md">
  <h2>Sale complete</h2>
  <div class="rc" id="rcBox"></div>
- <div class="mact"><button class="btn" id="rcPrint">Print</button><button class="btn p" id="rcNew">New order</button></div>
+ <div class="mact"><button class="btn" id="rcPrint">Print</button><button class="btn" id="rcDel" style="display:none;color:var(--red)">Remove sale</button><button class="btn p" id="rcNew">New order</button></div>
 </div></div>
 
+<div class="ov" id="ovDel" style="z-index:30"><div class="md">
+ <h2 id="dlTitle">Remove sale</h2>
+ <p id="dlMsg" style="margin:0 0 10px;color:#666;font-size:14px"></p>
+ <div class="lbl">Owner email</div>
+ <input type="email" id="dlEm" autocomplete="username" placeholder="Email">
+ <div class="lbl">Password</div>
+ <input type="password" id="dlPw" autocomplete="current-password" placeholder="Password">
+ <div id="dlErr" style="color:var(--red);font-size:13px;font-weight:700;margin-top:8px;min-height:16px"></div>
+ <div class="mact"><button class="btn" id="dlCancel" type="button">Cancel</button><button class="btn p" id="dlOk" type="button" style="background:var(--red);border-color:var(--red)">Remove</button></div>
+</div></div>
 <div class="ov" id="ovRep"><div class="md wide">
  <h2>Sales report</h2>
  <div class="rp-date rp-nav"><button class="btn" id="rPrev" type="button" aria-label="Previous day">‹</button><input type="date" id="rDate" aria-label="Report date"><button class="btn" id="rNext" type="button" aria-label="Next day">›</button></div>
  <div class="rp-dl"><b id="rLabel"></b><span class="rp-tag" id="rTag">Today</span><button class="btn sm" id="rToday" type="button">Back to today</button></div>
  <div id="repBody"></div>
- <div class="mact"><button class="btn sm" id="rCsv">Export this day (Excel)</button><button class="btn sm" id="rCsvAll">Export all days (Excel)</button><button class="btn p" id="rClose">Close</button></div>
+ <div class="mact"><button class="btn sm" id="rDelAll" style="color:var(--red)">Remove all sales</button><button class="btn sm" id="rCsv">Export this day (Excel)</button><button class="btn sm" id="rCsvAll">Export all days (Excel)</button><button class="btn p" id="rClose">Close</button></div>
 </div></div>
 <div class="ov" id="ovAdd"><div class="md">
  <h2>Add menu item</h2>
@@ -749,7 +759,7 @@ function renderOrders(){
 }
 function showReceipt(no,day){
  var s=db.sales.filter(function(x){return x.no===no&&dayKey(x)===(day||today())})[0];if(!s)return;
- rcView=true;$("rcBox").innerHTML=receipt(s);
+ rcView=true;rcSale=s;$("rcDel").style.display="";$("rcBox").innerHTML=receipt(s);
  document.querySelector("#ovRc h2").textContent="Receipt #"+s.no;
  $("rcNew").textContent="Close";$("ovRc").classList.add("on");
 }
@@ -932,7 +942,7 @@ function saveChecked(){try{if(!CUR)return false;localStorage.setItem(dbKey(),JSO
 function showSaleReceipt(){
  $("ovCf").classList.remove("on");
  if(!cfSale)return;
- lastSale=cfSale;rcView=false;document.querySelector("#ovRc h2").textContent="Sale complete";$("rcNew").textContent="New order";updNav();
+ lastSale=cfSale;rcView=false;$("rcDel").style.display="none";document.querySelector("#ovRc h2").textContent="Sale complete";$("rcNew").textContent="New order";updNav();
  $("ovPay").classList.remove("on");
  $("rcBox").innerHTML=receipt(cfSale);
  $("ovRc").classList.add("on");
@@ -1456,7 +1466,7 @@ function syncAll(){
  if(!ses||!CUR||syncBusy||!navigator.onLine)return Promise.resolve();
  syncBusy=true;var who=CUR;
  var p=pending().filter(function(x){return x.by===who});
- var up=resetCloudOnce(who).then(function(){return p.length?sbReq("POST","pos_orders?on_conflict=client_id",p.map(toRow),{Prefer:"resolution=ignore-duplicates,return=representation"}).then(function(){p.forEach(function(x){x.sy=1});save()}):Promise.resolve()});
+ var up=p.length?sbReq("POST","pos_orders?on_conflict=client_id",p.map(toRow),{Prefer:"resolution=ignore-duplicates,return=representation"}).then(function(){p.forEach(function(x){x.sy=1});save()}):Promise.resolve();
  return up.then(function(){
   return sbReq("GET","pos_orders?select=client_id,sale&cashier=eq."+who+"&order=sold_at.desc&limit=1000");
  }).then(function(rows){
@@ -1527,7 +1537,7 @@ function syncMenu(){
   if(!menuWarned){menuWarned=true;toast(menuMissing(e)?"Menu sync needs the pos_menu table - run the SQL setup in Supabase":"Menu sync failed: "+((e&&(e.message||e.msg))||"error"))}
  }).then(function(){menuBusy=false;if(menuAgain){menuAgain=false;setTimeout(syncMenu,300)}});
 }
-/* One-time sales reset (Nov 28 2026): clears User 1 + User 2 sales, local and cloud, then restarts at order #1 */
+/* One-time local sales reset (Nov 28 2026): restarts User 1 + User 2 at order #1 (cloud already cleared) */
 var RS="alsa_pos_reset_20261128";
 function rsGet(k){try{return localStorage.getItem(RS+k)==="1"}catch(e){return true}}
 function rsSet(k){try{localStorage.setItem(RS+k,"1")}catch(e){}}
@@ -1536,10 +1546,6 @@ function resetLocalOnce(u){
  try{localStorage.removeItem(KEY+"_"+u);if(u==="u1")localStorage.removeItem(KEY)}catch(e){}
  rsSet("_l_"+u);
 }
-function resetCloudOnce(u){
- if(rsGet("_c_"+u)||!ses)return Promise.resolve();
- return sbReq("DELETE","pos_orders?cashier=eq."+u,null,{Prefer:"return=minimal"}).then(function(){rsSet("_c_"+u)}).catch(function(){});
-}
 function pickUser(u){
  resetLocalOnce(u);
  CUR=u;load();cart={};disc=0;otype="Dine-in";setSeg("otype","Dine-in");setSeg("disc","0");
@@ -1547,6 +1553,53 @@ function pickUser(u){
  $("ovUser").classList.remove("on");
  renderCart();chip();syncAll();
 }
+
+/* ===== Remove sales (owner email + password required) ===== */
+var OWNER="consuelou.m@yahoo.com",rcSale=null,delMode="",delBusy=false;
+function openDel(mode){
+ delMode=mode;
+ $("dlTitle").textContent=mode==="all"?"Remove ALL sales":"Remove sale #"+(rcSale?rcSale.no:"");
+ $("dlMsg").textContent=mode==="all"?"This permanently deletes every sale of "+UNAME[CUR]+" (on this device and in the cloud) and restarts at order #1. Enter the owner email and password to continue.":"This permanently deletes this sale from this device and the cloud. Enter the owner email and password to continue.";
+ $("dlEm").value="";$("dlPw").value="";$("dlErr").textContent="";
+ $("ovDel").classList.add("on");setTimeout(function(){$("dlEm").focus()},50);
+}
+function closeDel(){$("ovDel").classList.remove("on");$("dlPw").value=""}
+function doDel(){
+ if(delBusy)return;
+ var em=$("dlEm").value.trim().toLowerCase(),pw=$("dlPw").value;
+ if(em!==OWNER){$("dlErr").textContent="Only the owner email can remove sales.";return}
+ if(!pw){$("dlErr").textContent="Enter the password.";return}
+ if(!CUR){$("dlErr").textContent="No user selected.";return}
+ if(!navigator.onLine){$("dlErr").textContent="Internet is needed to verify the password.";return}
+ delBusy=true;$("dlOk").textContent="Checking…";$("dlErr").textContent="";
+ var who=CUR,mode=delMode,sale=rcSale;
+ fetch(SB+"/auth/v1/token?grant_type=password",{method:"POST",headers:{apikey:SBK,"Content-Type":"application/json"},body:JSON.stringify({email:em,password:pw})})
+ .then(function(r){return r.json().then(function(j){if(!r.ok)throw {bad:1};return j})})
+ .then(function(j){
+  var q=mode==="all"?"cashier=eq."+who:"client_id=eq."+encodeURIComponent(sale.id);
+  return fetch(SB+"/rest/v1/pos_orders?"+q,{method:"DELETE",headers:{apikey:SBK,Authorization:"Bearer "+j.access_token,Prefer:"return=minimal"}})
+   .then(function(r){if(!r.ok)throw {cloud:1}});
+ })
+ .then(function(){
+  if(who!==CUR)return;
+  if(mode==="all"){db={seq:1,sales:[],day:today()}}
+  else{db.sales=db.sales.filter(function(x){return x.id!==sale.id})}
+  save();closeDel();
+  if(mode==="one")$("ovRc").classList.remove("on");
+  renderCart();if(view==="orders")renderOrders();
+  if($("ovRep").classList.contains("on"))renderReport();
+  chip();toast(mode==="all"?"All sales removed":"Sale removed");
+ })
+ .catch(function(e){
+  $("dlErr").textContent=e&&e.bad?"Wrong email or password.":e&&e.cloud?"Could not delete from the cloud. Nothing was removed.":"Can’t reach the database. Nothing was removed.";
+ })
+ .then(function(){delBusy=false;$("dlOk").textContent="Remove"});
+}
+$("rcDel").addEventListener("click",function(){if(rcSale)openDel("one")});
+$("rDelAll").addEventListener("click",function(){openDel("all")});
+$("dlCancel").addEventListener("click",closeDel);
+$("dlOk").addEventListener("click",doDel);
+$("dlPw").addEventListener("keydown",function(e){if(e.key==="Enter")doDel()});
 function showUsers(){
  if(CUR&&Object.keys(cart).length&&!confirm("Switch user? The current order will be cleared."))return;
  $("ovUser").classList.add("on");
